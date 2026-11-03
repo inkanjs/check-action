@@ -1,0 +1,135 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Fixture",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/teas/{id}": {
+      "get": {
+        "operationId": "getTeasById",
+        "summary": "One tea",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "examples": {
+              "sencha": {
+                "value": 1
+              },
+              "none": {
+                "value": 9
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tea"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The input does not match the contract",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "x-inkan-implied": true
+          },
+          "404": {
+            "description": "An RFC 9457 problem document",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-inkan-examples": [
+          {
+            "name": "sencha",
+            "params": {
+              "id": 1
+            },
+            "expect": {
+              "name": "Sencha",
+              "price": 9.5
+            }
+          },
+          {
+            "name": "none",
+            "params": {
+              "id": 9
+            },
+            "status": 404
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Tea": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "price": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "price"
+        ]
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "A stable code for this kind of problem"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status"
+        ],
+        "description": "An RFC 9457 problem document"
+      }
+    }
+  }
+}

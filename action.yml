@@ -1,0 +1,82 @@
+name: inkan check
+description: Runs every inkan example as a test and names the changes that would break a client, as one PR comment.
+author: vensin
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  entry:
+    description: The file that builds the app and exports it, for example src/app.ts. Relative to working-directory.
+    required: true
+  working-directory:
+    description: Where package.json and the entry live.
+    default: "."
+  base-ref:
+    description: What to compare with, a branch or a commit. Empty takes the PR base (github.base_ref), or on push the commit before.
+    default: ""
+  openapi-file:
+    description: An OpenAPI document committed in the repository (relative to working-directory). Read from the base with git show, so the base needs no install. Empty, or missing in the base, builds the base instead.
+    default: ""
+  install:
+    description: Run npm ci (npm install without a lockfile) for the head and, when it has to be built, the base.
+    default: "true"
+  strict:
+    description: inkan check --strict, a promised status no example covers fails the check.
+    default: "false"
+  comment:
+    description: Create or update one comment on the pull request. The job summary gets the report either way.
+    default: "true"
+  fail-on-breaking:
+    description: Fail the job when a change would break a client.
+    default: "true"
+  github-token:
+    description: The token for the PR comment. It needs pull-requests write.
+    default: ${{ github.token }}
+
+outputs:
+  breaking:
+    description: How many changes would break a client (0 when nothing was compared).
+    value: ${{ steps.run.outputs.breaking }}
+  changes:
+    description: How many changes there are, breaking and safe.
+    value: ${{ steps.run.outputs.changes }}
+  check-ok:
+    description: true when every example holds (and, with strict, every promised status is covered).
+    value: ${{ steps.run.outputs.check-ok }}
+  compared:
+    description: true when there was a base to compare with.
+    value: ${{ steps.run.outputs.compared }}
+  report:
+    description: Path to the Markdown report.
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/src/run.sh"
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+        ENTRY: ${{ inputs.entry }}
+        WORKDIR: ${{ inputs.working-directory }}
+        BASE_REF: ${{ inputs.base-ref }}
+        OPENAPI_FILE: ${{ inputs.openapi-file }}
+        INSTALL: ${{ inputs.install }}
+        STRICT: ${{ inputs.strict }}
+
+    - if: inputs.comment == 'true'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/src/comment.sh"
+      env:
+        REPORT: ${{ steps.run.outputs.report }}
+        NOTEWORTHY: ${{ steps.run.outputs.noteworthy }}
+        GH_TOKEN: ${{ inputs.github-token }}
+
+    - shell: bash
+      run: bash "$GITHUB_ACTION_PATH/src/verdict.sh"
+      env:
+        CHECK_OK: ${{ steps.run.outputs.check-ok }}
+        BREAKING: ${{ steps.run.outputs.breaking }}
+        FAIL_ON_BREAKING: ${{ inputs.fail-on-breaking }}

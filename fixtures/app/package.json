@@ -1,0 +1,8 @@
+{
+  "name": "inkan-check-action-fixture",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vxnsin/inkan": "^0.8.1"
+  }
+}

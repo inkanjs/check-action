@@ -1,0 +1,88 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # the scripts, against throwaway repositories, without GitHub in the loop
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: bash scripts/test-local.sh
+
+  # the action itself, through action.yml, against one fixture pull request each
+  action:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: clean, variant: clean, openapi-file: "", breaking: "0", changes: "2", check-ok: "true", outcome: success }
+          - { name: breaking, variant: breaking, openapi-file: "", breaking: "1", changes: "1", check-ok: "true", outcome: failure }
+          - { name: "breaking, committed openapi", variant: breaking, openapi-file: openapi.json, breaking: "1", changes: "1", check-ok: "true", outcome: failure }
+          - { name: failing example, variant: failing, openapi-file: "", breaking: "0", changes: "0", check-ok: "false", outcome: failure }
+    name: action (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: bash scripts/fixture-repo.sh "${{ matrix.variant }}" "$RUNNER_TEMP/fixture"
+      - id: inkan
+        uses: ./
+        continue-on-error: true
+        with:
+          entry: app.js
+          working-directory: ${{ runner.temp }}/fixture
+          base-ref: main
+          openapi-file: ${{ matrix.openapi-file }}
+          comment: "false"
+      - name: the outputs and the outcome are as expected
+        env:
+          OUTCOME: ${{ steps.inkan.outcome }}
+          BREAKING: ${{ steps.inkan.outputs.breaking }}
+          CHANGES: ${{ steps.inkan.outputs.changes }}
+          CHECK_OK: ${{ steps.inkan.outputs.check-ok }}
+          REPORT: ${{ steps.inkan.outputs.report }}
+          WANT_OUTCOME: ${{ matrix.outcome }}
+          WANT_BREAKING: ${{ matrix.breaking }}
+          WANT_CHANGES: ${{ matrix.changes }}
+          WANT_CHECK_OK: ${{ matrix.check-ok }}
+        run: |
+          set -u
+          bad=0
+          for pair in "OUTCOME WANT_OUTCOME" "BREAKING WANT_BREAKING" "CHANGES WANT_CHANGES" "CHECK_OK WANT_CHECK_OK"; do
+            set -- $pair
+            if [ "${!1}" = "${!2}" ]; then echo "ok   $1 = ${!1}"; else echo "FAIL $1 = ${!1}, wanted ${!2}"; bad=1; fi
+          done
+          head -n 1 "$REPORT" | grep -qx '<!-- inkan-check -->' || { echo "FAIL the report has no marker"; bad=1; }
+          exit "$bad"
+
+  # a real comment on this repository's own pull requests (summary only from forks)
+  comment:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: bash scripts/fixture-repo.sh breaking "$RUNNER_TEMP/fixture"
+      - uses: ./
+        with:
+          entry: app.js
+          working-directory: ${{ runner.temp }}/fixture
+          base-ref: main
+          fail-on-breaking: "false"
