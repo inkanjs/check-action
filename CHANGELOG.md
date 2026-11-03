@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (unreleased)
+## 1.0.0
 
 - The first version: `inkan check` and `inkan diff` on every pull request, one comment marked
   `<!-- inkan-check -->` updated per run, the same report in the job summary.
