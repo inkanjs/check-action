@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
 # Runs the action's scripts the way action.yml does, without GitHub: one throwaway
 # repository per fixture pull request (main + pr, the base built in a git worktree),
-# @vxnsin/inkan from npm. Proves the JSON -> Markdown path, the outputs and the exit codes.
+# @vxnsin/inkan from npm. Proves the outputs and the exit codes, and both ways to the
+# Markdown: inkan 0.8 (the lockfile's 0.8.1), where src/render.mjs writes it from the
+# JSON, and with INKAN_CORE set, a local inkan 0.9+ (packed with npm pack, installed from
+# the tarball), whose --format markdown writes it.
 #
-# scripts/test-local.sh            (needs node, npm, git)
+# scripts/test-local.sh                                  (needs node, npm, git)
+# INKAN_CORE=../inkan scripts/test-local.sh              the same, then against that core
 set -uo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/inkan-check-test.XXXXXX")"
+pass_dir="$tmp" # one folder per pass, set below
+spec=""         # the @vxnsin/inkan the fixtures install, empty: the lockfile's
 pass=0
 fail=0
 
@@ -22,8 +28,8 @@ output() { grep "^$1=" "$2" | tail -n 1 | cut -d= -f2-; }
 run_case() {
   local name="$1" variant="$2"
   shift 2
-  local dir="$tmp/$name"
-  bash "$root/scripts/fixture-repo.sh" "$variant" "$dir/repo"
+  local dir="$pass_dir/$name"
+  bash "$root/scripts/fixture-repo.sh" "$variant" "$dir/repo" ${spec:+"$spec"}
   : >"$dir/outputs"
   : >"$dir/summary.md"
   (
@@ -45,7 +51,7 @@ run_case() {
 }
 
 check_case() { # check_case <name> <run code> <breaking> <changes> <check-ok> <compared> <verdict code>
-  local dir="$tmp/$1"
+  local dir="$pass_dir/$1"
   echo "$1"
   expect "run.sh exit" "$(cat "$dir/run.code")" "$2"
   expect "breaking" "$(output breaking "$dir/outputs")" "$3"
@@ -57,42 +63,94 @@ check_case() { # check_case <name> <run code> <breaking> <changes> <check-ok> <c
 }
 
 has() { # has <name> <file> <text>
-  if grep -qF -- "$3" "$tmp/$1/$2"; then ok "$2 has: $3"; else no "$2 lacks: $3"; fi
+  if grep -qF -- "$3" "$pass_dir/$1/$2"; then ok "$2 has: $3"; else no "$2 lacks: $3"; fi
+}
+
+# cases <native|fallback>: every fixture pull request, with the Markdown of that way
+cases() {
+  local way="$1"
+  echo "== $way: $(if [ "$way" = native ]; then echo "inkan --format markdown"; else echo "src/render.mjs"; fi)"
+
+  run_case clean clean
+  check_case clean 0 0 2 true true 0
+  if [ "$way" = native ]; then
+    has clean run.log "the Markdown comes from inkan --format markdown"
+    has clean summary.md "**✓ no breaking changes** · 2 safe changes"
+    has clean summary.md '| · | `GET /teas` | is new | `route-added` |'
+    has clean summary.md "**✓ all 3 examples pass**"
+  else
+    has clean run.log "older than 0.9.0, the action renders the Markdown itself"
+    has clean summary.md "✓ nothing breaks a client"
+    has clean summary.md '| · | `GET /teas` | is new |'
+  fi
+
+  run_case breaking breaking
+  check_case breaking 0 1 1 true true 1
+  has breaking summary.md "**✗ 1 breaking change**"
+  has breaking run.log "base: built app.js at"
+  if [ "$way" = native ]; then
+    has breaking summary.md '| ✗ | `GET /teas/{id}` | the 200 answer.price is gone | `response-field-removed` |'
+  else
+    has breaking summary.md '| ✗ | `GET /teas/{id}` | the 200 answer.price is gone |'
+  fi
+
+  run_case breaking-warn breaking FAIL_ON_BREAKING=false
+  check_case breaking-warn 0 1 1 true true 0
+  has breaking-warn verdict.log "::warning title=inkan check::1 change(s) would break clients"
+
+  run_case openapi-file breaking OPENAPI_FILE=openapi.json
+  check_case openapi-file 0 1 1 true true 1
+  has openapi-file run.log "base: openapi.json at"
+
+  run_case failing failing
+  check_case failing 0 0 0 false true 1
+  if [ "$way" = native ]; then
+    has failing summary.md '| ✗ | `GET /teas/:id` | sencha | 200 |'
+  else
+    has failing summary.md '- ✗ `GET /teas/:id` sencha (status 200)'
+  fi
+  has failing summary.md 'body.name: expected "Sencha", got "SENCHA"'
+
+  run_case no-base clean BASE_REF=
+  check_case no-base 0 0 0 true false 0
+
+  run_case bad-entry clean ENTRY=missing.js
+  echo "bad-entry"
+  expect "run.sh exit" "$(cat "$pass_dir/bad-entry/run.code")" 2
+
+  # the entry throws: 0.9 exits with 2, 0.8 with 1 and no JSON; either way a setup error
+  run_case throws throws
+  echo "throws"
+  expect "run.sh exit" "$(cat "$pass_dir/throws/run.code")" 2
+  has throws run.log "the fixture entry throws on purpose"
+  if [ "$way" = native ]; then
+    has throws run.out "inkan check app.js stopped with exit code 2"
+  else
+    has throws run.out "inkan check app.js gave no report"
+  fi
+  echo
 }
 
 echo "inkan-check test in $tmp"
 echo
 
-run_case clean clean
-check_case clean 0 0 2 true true 0
-has clean summary.md "✓ nothing breaks a client"
-has clean summary.md '| · | `GET /teas` | is new |'
+pass_dir="$tmp/0.8"
+cases fallback
 
-run_case breaking breaking
-check_case breaking 0 1 1 true true 1
-has breaking summary.md "**✗ 1 breaking change**"
-has breaking summary.md '| ✗ | `GET /teas/{id}` | the 200 answer.price is gone |'
-has breaking run.log "base: built app.js at"
-
-run_case breaking-warn breaking FAIL_ON_BREAKING=false
-check_case breaking-warn 0 1 1 true true 0
-has breaking-warn verdict.log "::warning title=inkan check::1 change(s) would break clients"
-
-run_case openapi-file breaking OPENAPI_FILE=openapi.json
-check_case openapi-file 0 1 1 true true 1
-has openapi-file run.log "base: openapi.json at"
-
-run_case failing failing
-check_case failing 0 0 0 false true 1
-has failing summary.md '- ✗ `GET /teas/:id` sencha (status 200)'
-has failing summary.md 'body.name: expected "Sencha", got "SENCHA"'
-
-run_case no-base clean BASE_REF=
-check_case no-base 0 0 0 true false 0
-
-run_case bad-entry clean ENTRY=missing.js
-echo "bad-entry"
-expect "run.sh exit" "$(cat "$tmp/bad-entry/run.code")" 2
+if [ -n "${INKAN_CORE:-}" ]; then
+  # pack the core into the scratch folder (its prepublish scripts stay off: dist must be built)
+  core="$(cd "$INKAN_CORE" && pwd)"
+  command -v cygpath >/dev/null && core="$(cygpath -m "$core")"
+  mkdir -p "$tmp/pack"
+  tarball="$(cd "$tmp/pack" && npm pack "$core" --ignore-scripts --silent | tail -n 1)"
+  spec="$tmp/pack/$tarball"
+  command -v cygpath >/dev/null && spec="$(cygpath -m "$spec")" # npm on Windows wants C:/…
+  [ -f "$spec" ] || { echo "npm pack $core gave no tarball"; exit 1; }
+  spec="file:$spec"
+  echo "core: $(node -p 'require(process.argv[1]).version' "$core/package.json") from $spec"
+  pass_dir="$tmp/core"
+  cases native
+fi
 
 echo "comment.sh"
 printf '{"pull_request":{"number":7,"head":{"repo":{"full_name":"someone/fork"}}}}' >"$tmp/fork.json"

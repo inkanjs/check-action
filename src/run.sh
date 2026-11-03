@@ -33,15 +33,56 @@ if [ "${INSTALL:-true}" = "true" ]; then
   install || die "npm could not install the dependencies in $(pwd)"
 fi
 
+# ---------- which inkan ----------
+# 0.9.0 and newer write the Markdown themselves (--format markdown); older ones
+# get it from src/render.mjs. The JSON is read either way, for the outputs.
+version="$(inkan --version 2>/dev/null | tail -n 1 | tr -d '\r')"
+[ -n "$version" ] || die "npx inkan --version gave nothing in $(pwd): is @vxnsin/inkan a dependency, and installed?"
+native=false
+if node -e 'const [a, b] = process.argv[1].split(/[.-]/).map(Number); process.exit(a > 0 || b >= 9 ? 0 : 1)' "$version"; then
+  native=true
+  say "inkan $version: the Markdown comes from inkan --format markdown"
+else
+  say "inkan $version: older than 0.9.0, the action renders the Markdown itself"
+fi
+
+json_ok() { node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$1" 2>/dev/null; }
+
+# run_inkan <file> <what> <args...>: exit 0 and 1 are results, 2 and up mean
+# inkan could not run (a usage or load error), which is the setup's fault
+run_inkan() {
+  local file="$1" what="$2"
+  shift 2
+  inkan "$@" >"$file" 2>"$file.err"
+  local code=$?
+  if [ "$code" -ge 2 ]; then
+    cat "$file.err" >&2
+    die "$what stopped with exit code $code: inkan could not load the app or was called wrongly, nothing was checked (see above)"
+  fi
+  return 0
+}
+
+# markdown <file> <what> <args...>: the core's Markdown, or no file (then render.mjs writes it)
+markdown() {
+  local file="$1" what="$2"
+  shift 2
+  [ "$native" = "true" ] || return 0
+  inkan "$@" --format markdown >"$file" 2>"$file.err"
+  if [ "$?" -ge 2 ]; then
+    cat "$file.err" >&2
+    echo "::warning title=inkan check::$what --format markdown failed, the action renders the report itself"
+    rm -f "$file"
+  fi
+  return 0
+}
+
 # ---------- head: the examples ----------
 strict=()
 [ "${STRICT:-false}" = "true" ] && strict=(--strict)
-inkan check "$ENTRY" --json ${strict[@]+"${strict[@]}"} >"$out/check.json" 2>"$out/check.err"
-code=$?
-if [ "$code" -gt 1 ]; then
-  cat "$out/check.err" >&2
-  die "inkan check $ENTRY stopped with exit code $code (see above)"
-fi
+run_inkan "$out/check.json" "inkan check $ENTRY" check "$ENTRY" --json ${strict[@]+"${strict[@]}"}
+# before 0.9, inkan exits with 1 on a load error too: no JSON means it did not run
+json_ok "$out/check.json" || { cat "$out/check.json.err" >&2; die "inkan check $ENTRY gave no report: it could not load the entry (see above)"; }
+markdown "$out/check.md" "inkan check" check "$ENTRY" ${strict[@]+"${strict[@]}"}
 
 # ---------- base: which commit ----------
 ref="${BASE_REF:-${GITHUB_BASE_REF:-}}"
@@ -96,15 +137,14 @@ fi
 # ---------- head against base ----------
 diff_args=()
 if [ -n "$base_json" ]; then
-  inkan diff "$base_json" "$ENTRY" --json >"$out/diff.json" 2>"$out/diff.err"
-  code=$?
-  if [ "$code" -gt 1 ]; then
-    cat "$out/diff.err" >&2
-    die "inkan diff stopped with exit code $code (see above)"
-  fi
+  run_inkan "$out/diff.json" "inkan diff" diff "$base_json" "$ENTRY" --json
+  json_ok "$out/diff.json" || { cat "$out/diff.json.err" >&2; die "inkan diff gave no list of changes: it could not load the entry (see above)"; }
+  markdown "$out/diff.md" "inkan diff" diff "$base_json" "$ENTRY"
   diff_args=(--diff "$out/diff.json" --base "${base_sha:0:7}${ref:+ ($ref)}")
+  [ -f "$out/diff.md" ] && diff_args+=(--diff-md "$out/diff.md")
 fi
 [ -n "$note" ] && diff_args+=(--note "$note")
+[ -f "$out/check.md" ] && diff_args+=(--check-md "$out/check.md")
 
 node "$ACTION_DIR/src/render.mjs" --check "$out/check.json" ${diff_args[@]+"${diff_args[@]}"} --out "$out/report.md" >"$out/render.out" \
   || die "could not render the report"

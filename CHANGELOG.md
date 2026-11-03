@@ -9,5 +9,6 @@
   `compared`, `report`.
 - The base comes from a committed OpenAPI document (`git show`) or is built in a `git worktree`.
 - Pull requests from forks get the job summary only.
-- The Markdown is rendered from `--json` by `src/render.mjs` until the core has
-  `inkan diff --format markdown`.
+- With inkan 0.9.0 or newer the report is the core's `--format markdown` (with each change's
+  `kind`); with 0.8, `src/render.mjs` renders it from `--json`. Exit code 2 or more from inkan
+  (it could not load the app, or a usage error) stops the action with an error; 0 and 1 are results.

@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Builds a throwaway git repository for one fixture pull request:
 # main holds fixtures/app, the branch pr adds fixtures/<variant> on top.
+# An inkan spec (for example the absolute path of a tarball from npm pack) replaces
+# the locked @vxnsin/inkan; the lockfile goes, so npm install resolves it in the
+# repository and in the base's worktree alike.
 #
-# scripts/fixture-repo.sh <breaking|clean|failing> <dir>
+# scripts/fixture-repo.sh <breaking|clean|failing> <dir> [inkan spec]
 set -euo pipefail
 
 variant="$1"
 dir="$2"
+spec="${3:-}"
 fixtures="$(cd "$(dirname "$0")/../fixtures" && pwd)"
 [ -d "$fixtures/$variant" ] || { echo "no fixture $variant" >&2; exit 2; }
 
@@ -17,6 +21,15 @@ git config user.name fixture
 git config user.email fixture@example.invalid
 git config core.autocrlf false
 cp "$fixtures/app/"* .
+if [ -n "$spec" ]; then
+  rm package-lock.json
+  SPEC="$spec" node -e '
+    const fs = require("fs");
+    const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+    pkg.dependencies["@vxnsin/inkan"] = process.env.SPEC;
+    fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+  '
+fi
 git add -A
 git commit --quiet -m "base"
 git checkout --quiet -b pr
