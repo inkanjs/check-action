@@ -37,7 +37,7 @@ fi
 # 0.9.0 and newer write the Markdown themselves (--format markdown); older ones
 # get it from src/render.mjs. The JSON is read either way, for the outputs.
 version="$(inkan --version 2>/dev/null | tail -n 1 | tr -d '\r')"
-[ -n "$version" ] || die "npx inkan --version gave nothing in $(pwd): is @vxnsin/inkan a dependency, and installed?"
+[ -n "$version" ] || die "npx inkan --version gave nothing in $(pwd): is @inkanjs/inkan (or the older @vxnsin/inkan) a dependency, and installed?"
 native=false
 if node -e 'const [a, b] = process.argv[1].split(/[.-]/).map(Number); process.exit(a > 0 || b >= 9 ? 0 : 1)' "$version"; then
   native=true
